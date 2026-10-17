@@ -589,12 +589,12 @@ export class RunnerCore {
       }
       this.writeSidecar({});
       if (!wasReady) {
-        // Only the FIRST get_state->ready transition announces READY and
-        // posts identity. The 5s heartbeat re-confirms liveness silently —
+        // Only the FIRST get_state->ready transition announces READY.
+        // The 5s heartbeat re-confirms liveness silently —
         // re-printing READY on every poll spammed the pane (regression fold).
         this.io.mirrorLine(`${this.runtime === "omp" ? "[omp-runner] READY" : PI_RUNNER_READY_MARKER} session=${this.sessionFile ?? "unknown"}`);
-        this.postSessionIdentity();
       }
+      this.postSessionIdentity();
       return;
     }
     if (record.id === CURSOR_REFRESH_ID || record.id === CATCH_UP_ID) {
