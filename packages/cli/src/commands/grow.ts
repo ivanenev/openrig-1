@@ -2,6 +2,7 @@ import { resolve as resolvePath } from "node:path";
 import { Command } from "commander";
 import { DaemonClient } from "../client.js";
 import { getDaemonStatus, getDaemonUrl, daemonStatusGuard } from "../daemon-lifecycle.js";
+import { resolveRigHandle } from "../rig-handle.js";
 import { realDeps } from "./daemon.js";
 import type { StatusDeps } from "./status.js";
 import { resolveDefaultAgentRef } from "./topology-default-agent.js";
@@ -41,28 +42,6 @@ interface ExpandResult {
   error?: string;
 }
 
-interface RigSummary {
-  id: string;
-  name: string;
-}
-
-const ULID_RE = /^[0-9A-Z]{26}$/;
-
-async function resolveRigId(client: DaemonClient, rigRef: string): Promise<string> {
-  if (ULID_RE.test(rigRef)) {
-    return rigRef;
-  }
-  const res = await client.get<RigSummary[]>("/api/rigs/summary");
-  if (res.status >= 400 || !Array.isArray(res.data)) {
-    throw new Error(`Rig "${rigRef}" was not found.`);
-  }
-  const match = res.data.find((r) => r.name === rigRef);
-  if (!match) {
-    throw new Error(`Rig "${rigRef}" was not found.`);
-  }
-  return match.id;
-}
-
 export function growCommand(depsOverride?: StatusDeps): Command {
   const cmd = new Command("grow").description("Add one or more seats to a running rig");
   const getDeps = () => depsOverride ?? {
@@ -94,14 +73,19 @@ export function growCommand(depsOverride?: StatusDeps): Command {
       if (!daemonStatusGuard(status)) return;
       const client = deps.clientFactory(getDaemonUrl(status));
 
-      let resolvedRigId: string;
-      try {
-        resolvedRigId = await resolveRigId(client, rigId);
-      } catch (err) {
-        console.error(err instanceof Error ? err.message : String(err));
+      const resolution = await resolveRigHandle(client, rigId);
+      if (resolution.kind === "ambiguous") {
+        const msg = `'${rigId}' matches ${resolution.ids.length} rigs. Nothing was grown. Re-run with the specific id, e.g. ${resolution.ids.map((id) => `rig grow ${id} ${members.join(" ")}`).join("  |  ")}`;
+        if (opts.json) {
+          console.log(JSON.stringify({ ok: false, code: "rig_ambiguous", message: msg, candidates: resolution.ids }, null, 2));
+        } else {
+          console.error(msg);
+        }
         process.exitCode = 1;
         return;
       }
+
+      const resolvedRigId = resolution.kind === "resolved" ? resolution.id : rigId;
 
       const rigRes = await client.get<RigNode[]>(`/api/rigs/${encodeURIComponent(resolvedRigId)}/nodes`);
       if (rigRes.status >= 400) {
