@@ -41,6 +41,28 @@ interface ExpandResult {
   error?: string;
 }
 
+interface RigSummary {
+  id: string;
+  name: string;
+}
+
+const ULID_RE = /^[0-9A-Z]{26}$/;
+
+async function resolveRigId(client: DaemonClient, rigRef: string): Promise<string> {
+  if (ULID_RE.test(rigRef)) {
+    return rigRef;
+  }
+  const res = await client.get<RigSummary[]>("/api/rigs/summary");
+  if (res.status >= 400 || !Array.isArray(res.data)) {
+    throw new Error(`Rig "${rigRef}" was not found.`);
+  }
+  const match = res.data.find((r) => r.name === rigRef);
+  if (!match) {
+    throw new Error(`Rig "${rigRef}" was not found.`);
+  }
+  return match.id;
+}
+
 export function growCommand(depsOverride?: StatusDeps): Command {
   const cmd = new Command("grow").description("Add one or more seats to a running rig");
   const getDeps = () => depsOverride ?? {
@@ -72,7 +94,16 @@ export function growCommand(depsOverride?: StatusDeps): Command {
       if (!daemonStatusGuard(status)) return;
       const client = deps.clientFactory(getDaemonUrl(status));
 
-      const rigRes = await client.get<RigNode[]>(`/api/rigs/${encodeURIComponent(rigId)}/nodes`);
+      let resolvedRigId: string;
+      try {
+        resolvedRigId = await resolveRigId(client, rigId);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+        return;
+      }
+
+      const rigRes = await client.get<RigNode[]>(`/api/rigs/${encodeURIComponent(resolvedRigId)}/nodes`);
       if (rigRes.status >= 400) {
         console.error(`Rig ${rigId} was not found.`);
         process.exitCode = 1;
@@ -128,7 +159,7 @@ export function growCommand(depsOverride?: StatusDeps): Command {
 
       if (opts.newPod) {
         const res = await client.post<ExpandResult>(
-          `/api/rigs/${encodeURIComponent(rigId)}/expand`,
+          `/api/rigs/${encodeURIComponent(resolvedRigId)}/expand`,
           {
             pod: { id: pod, label: pod, members: memberSpecs, edges: [] },
             rigRoot: cwd,
@@ -158,7 +189,7 @@ export function growCommand(depsOverride?: StatusDeps): Command {
         const failures: string[] = [];
         for (const member of memberSpecs) {
           const res = await client.post<AddMemberResult>(
-            `/api/rigs/${encodeURIComponent(rigId)}/pods/${encodeURIComponent(pod)}/members`,
+            `/api/rigs/${encodeURIComponent(resolvedRigId)}/pods/${encodeURIComponent(pod)}/members`,
             { member, rigRoot: cwd },
             { timeoutMs: 120_000 },
           );
@@ -184,7 +215,7 @@ export function growCommand(depsOverride?: StatusDeps): Command {
       if (opts.json) {
         console.log(JSON.stringify({
           ok,
-          rigId,
+          rigId: resolvedRigId,
           rigName,
           pod,
           seats: nodes.map((node) => node.logicalId),
@@ -196,7 +227,7 @@ export function growCommand(depsOverride?: StatusDeps): Command {
           retryTargets,
         }, null, 2));
       } else if (ok) {
-        console.log(`Grew rig ${rigName ?? rigId}`);
+        console.log(`Grew rig ${rigName ?? resolvedRigId}`);
         if (nodes.length === 1) {
           const node = nodes[0]!;
           console.log(`  Seat: ${node.logicalId}${node.sessionName ? ` (${node.sessionName})` : ""}`);
@@ -207,7 +238,7 @@ export function growCommand(depsOverride?: StatusDeps): Command {
           }
         }
       } else {
-        console.error(`Grow did not fully succeed for ${rigName ?? rigId}`);
+        console.error(`Grow did not fully succeed for ${rigName ?? resolvedRigId}`);
         for (const node of nodes) {
           const icon = node.status === "launched" ? "OK" : node.status === "attention_required" ? "ATTENTION" : "FAIL";
           const session = node.sessionName ? ` (${node.sessionName})` : "";
@@ -220,7 +251,7 @@ export function growCommand(depsOverride?: StatusDeps): Command {
         for (const warning of warnings) console.error(`  Warning: ${warning}`);
         if (retryTargets.length > 0) {
           console.error("  Failed nodes can be relaunched individually. Recover by:");
-          for (const target of retryTargets) console.error(`    rig launch ${rigId} ${target}`);
+          for (const target of retryTargets) console.error(`    rig launch ${resolvedRigId} ${target}`);
         }
       }
 

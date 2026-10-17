@@ -4,6 +4,28 @@ import { getDaemonStatus, getDaemonUrl , daemonStatusGuard} from "../daemon-life
 import { realDeps } from "./daemon.js";
 import type { StatusDeps } from "./status.js";
 
+interface RigSummary {
+  id: string;
+  name: string;
+}
+
+const ULID_RE = /^[0-9A-Z]{26}$/;
+
+async function resolveRigId(client: DaemonClient, rigRef: string): Promise<string> {
+  if (ULID_RE.test(rigRef)) {
+    return rigRef;
+  }
+  const res = await client.get<RigSummary[]>("/api/rigs/summary");
+  if (res.status >= 400 || !Array.isArray(res.data)) {
+    throw new Error(`Rig "${rigRef}" was not found.`);
+  }
+  const match = res.data.find((r) => r.name === rigRef);
+  if (!match) {
+    throw new Error(`Rig "${rigRef}" was not found.`);
+  }
+  return match.id;
+}
+
 export function removeCommand(depsOverride?: StatusDeps): Command {
   const cmd = new Command("remove").description("Remove a node from a running rig");
   const getDeps = () => depsOverride ?? { lifecycleDeps: realDeps(), clientFactory: (url: string) => new DaemonClient(url) };
@@ -27,9 +49,18 @@ export function removeCommand(depsOverride?: StatusDeps): Command {
         return;
       }
 
+      let resolvedRigId: string;
+      try {
+        resolvedRigId = await resolveRigId(client, rigId);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+        return;
+      }
+
       const fallbackQuery = opts.fallback ? `?fallback=${encodeURIComponent(opts.fallback)}` : "";
       const res = await client.delete<Record<string, unknown>>(
-        `/api/rigs/${encodeURIComponent(rigId)}/nodes/${encodeURIComponent(nodeRef)}${fallbackQuery}`,
+        `/api/rigs/${encodeURIComponent(resolvedRigId)}/nodes/${encodeURIComponent(nodeRef)}${fallbackQuery}`,
       );
       if (opts.json) {
         console.log(JSON.stringify(res.data, null, 2));
