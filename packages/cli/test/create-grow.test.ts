@@ -498,7 +498,7 @@ describe("rig grow", () => {
       });
     });
 
-    it("passes through an exact id without name lookup", async () => {
+    it("resolves an exact id", async () => {
       const client = {
         get: vi.fn(async (path: string) => {
           if (path.includes("/api/rigs/summary")) return { status: 200, data: RIG_SUMMARY };
@@ -532,6 +532,27 @@ describe("rig grow", () => {
         ok: true,
         rigId: "01J00000000000000000000001",
       });
+    });
+
+    it("warns to use rig id when summary lookup fails (HTTP 500) and downstream node lookup fails", async () => {
+      const client = {
+        get: vi.fn(async (path: string) => {
+          if (path.includes("/api/rigs/summary")) return { status: 500, data: { error: "Internal Server Error" } };
+          if (path.includes("specs/library")) return { status: 200, data: library };
+          return { status: 404, data: { error: "Rig not found" } };
+        }),
+        post: vi.fn(),
+      };
+
+      const program = createProgram({ growDeps: deps(client) });
+      program.exitOverride();
+      const { logs, exitCode } = await captureLogs(() =>
+        program.parseAsync(["node", "rig", "grow", "my-rig", "worker", "--pod", "main"]));
+
+      expect(exitCode).toBe(1);
+      const output = logs.join("\n");
+      expect(output).toContain("Rig my-rig was not found.");
+      expect(output).toContain("Could not list rigs to resolve a name. If this is a rig name, pass the rig id instead (rig ps --json).");
     });
 
     it("refuses an ambiguous rig name and reports candidate ids", async () => {

@@ -90,6 +90,9 @@ export function growCommand(depsOverride?: StatusDeps): Command {
       const rigRes = await client.get<RigNode[]>(`/api/rigs/${encodeURIComponent(resolvedRigId)}/nodes`);
       if (rigRes.status >= 400) {
         console.error(`Rig ${rigId} was not found.`);
+        if (resolution.kind === "passthrough") {
+          console.error("Could not list rigs to resolve a name. If this is a rig name, pass the rig id instead (rig ps --json).");
+        }
         process.exitCode = 1;
         return;
       }

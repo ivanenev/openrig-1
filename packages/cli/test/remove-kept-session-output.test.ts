@@ -132,11 +132,22 @@ describe("#174 remove/shrink human output names a kept session", () => {
       expect(output).toContain("Removed node dev.impl from rig 01J00000000000000000000001");
     });
 
-    it("passes through an exact id without name lookup", async () => {
+    it("resolves an exact id", async () => {
       const clientDeps = mockClient();
       const { output, exitCode } = await run(removeCommand(clientDeps), ["remove", "01J00000000000000000000001", "dev.impl"]);
       expect(exitCode).toBeUndefined();
       expect(output).toContain("Removed node dev.impl from rig 01J00000000000000000000001");
+    });
+
+    it("warns to use rig id when summary lookup fails (HTTP 500) and node deletion fails", async () => {
+      const clientDeps = mockClient({
+        get: async () => ({ status: 500, data: { error: "daemon error" } }),
+        delete: async () => ({ status: 404, data: { ok: false, code: "rig_not_found", error: "Rig 'my-rig' not found." } }),
+      });
+      const { output, exitCode } = await run(removeCommand(clientDeps), ["remove", "my-rig", "dev.impl"]);
+      expect(exitCode).toBe(1);
+      expect(output).toContain("Rig 'my-rig' not found.");
+      expect(output).toContain("Could not list rigs to resolve a name. If this is a rig name, pass the rig id instead (rig ps --json).");
     });
 
     it("refuses an ambiguous rig name and reports candidate ids", async () => {

@@ -61,6 +61,11 @@ export function removeCommand(depsOverride?: StatusDeps): Command {
 
       if (res.status >= 400) {
         console.error(res.data["error"] ?? `Remove failed (HTTP ${res.status})`);
+        const isRigNotFound = res.data["code"] === "rig_not_found"
+          || (typeof res.data["error"] === "string" && res.data["error"].includes("Rig"));
+        if (resolution.kind === "passthrough" && isRigNotFound) {
+          console.error("Could not list rigs to resolve a name. If this is a rig name, pass the rig id instead (rig ps --json).");
+        }
         process.exitCode = 1;
         return;
       }
