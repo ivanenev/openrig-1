@@ -589,11 +589,13 @@ export class RunnerCore {
       }
       this.writeSidecar({});
       if (!wasReady) {
-        // Only the FIRST get_state->ready transition announces READY.
-        // The 5s heartbeat re-confirms liveness silently —
-        // re-printing READY on every poll spammed the pane (regression fold).
+        // Only the initial transition to ready announces READY in the pane.
+        // Subsequent get_state evaluations confirm liveness silently to avoid
+        // terminal output spam while preserving state updates.
         this.io.mirrorLine(`${this.runtime === "omp" ? "[omp-runner] READY" : PI_RUNNER_READY_MARKER} session=${this.sessionFile ?? "unknown"}`);
       }
+      // Re-post session identity on every successful get_state reply so the
+      // daemon can discover replacement runners and keep session records current.
       this.postSessionIdentity();
       return;
     }
